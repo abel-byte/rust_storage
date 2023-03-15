@@ -9,12 +9,12 @@ pub struct FileHead {
 }
 
 impl FileHead {
-    pub fn new(success: bool, file_info: FileInfo) -> Self {
+    pub fn new(success: bool, file_hash: String, file_name: String, size: usize) -> Self {
         FileHead {
             success,
-            file_hash: file_info.file_hash,
-            file_name: file_info.file_name,
-            size: file_info.size,
+            file_hash,
+            file_name,
+            size,
         }
     }
 }
@@ -35,5 +35,46 @@ impl FileInfo {
             size,
             content,
         }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InternalFiles {
+    pub files: Vec<InternalFile>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct InternalFile {
+    pub file_hash: String,
+    pub file_name: String,
+    pub file_content: Vec<u8>,
+    pub size: usize,
+}
+
+impl InternalFiles {
+    pub fn new(files: Vec<InternalFile>) -> Self {
+        InternalFiles { files }
+    }
+}
+
+impl InternalFile {
+    pub fn new(file_hash: String, file_name: String, file_content: Vec<u8>, size: usize) -> Self {
+        InternalFile {
+            file_hash,
+            file_name,
+            file_content,
+            size,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FileExists {
+    pub exists: bool,
+}
+
+impl FileExists {
+    pub fn new(exists: bool) -> Self {
+        FileExists { exists }
     }
 }

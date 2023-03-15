@@ -1,5 +1,5 @@
 use crate::{config::CONFIG, storage::Storage};
-use anyhow::Result;
+use anyhow::{anyhow, Ok, Result};
 use rocksdb::DB;
 use std::path::Path;
 use tokio::sync::OnceCell;
@@ -15,13 +15,22 @@ impl RocksDbStorage {
 
 impl Storage for RocksDbStorage {
     fn get(&self, key: &str) -> Result<Option<Vec<u8>>> {
-        let v = self.0.get(key)?.unwrap();
-        Ok(Some(v))
+        let v = self.0.get(key)?;
+        match v {
+            Some(val) => Ok(Some(val)),
+            None => Err(anyhow!("not found")),
+        }
     }
 
-    fn put(&self, key: &str, value: Vec<u8>) -> Result<Option<Vec<u8>>> {
-        self.0.put(key, value.clone()).unwrap();
-        Ok(Some(value))
+    fn exists(&self, key: &str) -> bool {
+        self.0.key_may_exist(key)
+    }
+
+    fn put(&self, key: &str, value: Vec<u8>) -> Result<()> {
+        if !self.exists(key) {
+            self.0.put(key, value.clone())?;
+        }
+        Ok(())
     }
 }
 

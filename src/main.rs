@@ -1,10 +1,12 @@
 use poem::{
     error::NotFoundError, get, http::StatusCode, listener::TcpListener, post, EndpointExt,
-    Response, Route, Server,
+    Response, Result, Route, Server,
 };
 use rust_storage::config;
 use rust_storage::handler::common_handler::index;
-use rust_storage::handler::file_handler::{download, internal_download, internal_upload, upload};
+use rust_storage::handler::file_handler::{
+    download, internal_download, internal_exists, internal_upload, upload,
+};
 use tracing::info;
 
 #[tokio::main]
@@ -17,6 +19,7 @@ async fn main() -> Result<(), std::io::Error> {
         .at("/file/:file_hash", get(download))
         .at("/internal/file/upload", post(internal_upload))
         .at("/internal/file/:file_hash", get(internal_download))
+        .at("/internal/file/:file_hash/exists", get(internal_exists))
         .catch_error(|_: NotFoundError| async move {
             Response::builder()
                 .status(StatusCode::NOT_FOUND)
