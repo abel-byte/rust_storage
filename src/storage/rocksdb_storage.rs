@@ -23,7 +23,11 @@ impl Storage for RocksDbStorage {
     }
 
     fn exists(&self, key: &str) -> bool {
-        self.0.key_may_exist(key)
+        let v = self.get(key);
+        match v {
+            Err(_) => false,
+            _ => true,
+        }
     }
 
     fn put(&self, key: &str, value: Vec<u8>) -> Result<()> {
