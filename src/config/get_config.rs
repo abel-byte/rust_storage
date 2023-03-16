@@ -1,4 +1,4 @@
-use std::{fs::File, io::Read};
+use std::{env, fs::File, io::Read};
 
 use once_cell::sync::Lazy;
 
@@ -9,7 +9,12 @@ pub static CONFIG: Lazy<Configs> = Lazy::new(self::Configs::init);
 
 impl Configs {
     pub fn init() -> Self {
-        let mut file = match File::open(CONFIG_FILE) {
+        let path = match env::var("CONFIG") {
+            Ok(val) => val,
+            Err(_) => CONFIG_FILE.to_string(),
+        };
+
+        let mut file = match File::open(path) {
             Ok(f) => f,
             Err(err) => panic!("config file {} not exists, error: {}", CONFIG_FILE, err),
         };

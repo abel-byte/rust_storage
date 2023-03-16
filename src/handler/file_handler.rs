@@ -13,12 +13,10 @@ use poem::{
 };
 use rand::seq::SliceRandom;
 use tokio::task::JoinSet;
-use tokio::time::Instant;
 use tracing::info;
 
 #[handler]
 pub async fn upload(mut multipart: Multipart) -> Result<Json<Vec<FileHead>>> {
-    let start = Instant::now();
     let mut files: Vec<FileHead> = Vec::new();
     let mut internal_files: Vec<InternalFile> = Vec::new();
     while let Ok(Some(field)) = multipart.next_field().await {
@@ -77,18 +75,13 @@ pub async fn upload(mut multipart: Multipart) -> Result<Json<Vec<FileHead>>> {
     }
     while let Some(_resp) = tasks.join_next().await {}
 
-    let duration = start.elapsed();
-    info!("upload cost {:?}", duration);
     Ok(Json(files))
 }
 
 #[handler]
 pub async fn download(Path(file_hash): Path<String>) -> poem::Response {
-    let start = Instant::now();
     // 先查询本节点，有则返回
     if let Ok(f) = file_service::find(file_hash.as_str()).await {
-        let duration = start.elapsed();
-        info!("download cost {:?}", duration);
         return Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "application/octet-stream")
@@ -129,8 +122,6 @@ pub async fn download(Path(file_hash): Path<String>) -> poem::Response {
     let resp = download_other(&file_hash, &internal_server);
     let resp = resp.await;
 
-    let duration = start.elapsed();
-    info!("download cost {:?}", duration);
     match resp {
         Ok(resp) => resp,
         Err(err) => Response::builder()
@@ -142,7 +133,6 @@ pub async fn download(Path(file_hash): Path<String>) -> poem::Response {
 
 #[handler]
 pub async fn internal_upload(req: Json<InternalFiles>) -> Json<Vec<FileHead>> {
-    let start = Instant::now();
     let mut files: Vec<FileHead> = Vec::new();
     let req_files = &req.files;
     for file in req_files {
@@ -158,28 +148,21 @@ pub async fn internal_upload(req: Json<InternalFiles>) -> Json<Vec<FileHead>> {
             file.size,
         ));
     }
-    let duration = start.elapsed();
-    info!("internal_upload cost {:?}", duration);
     Json(files)
 }
 
 #[handler]
 pub async fn internal_download(Path(file_hash): Path<String>) -> impl IntoResponse {
-    let start = Instant::now();
     let file = file_service::find(file_hash.as_str()).await;
     match file {
-        Ok(f) => {
-            let duration = start.elapsed();
-            info!("internal_download cost {:?}", duration);
-            Response::builder()
-                .status(StatusCode::OK)
-                .header("Content-Type", "application/octet-stream")
-                .header(
-                    "Content-Disposition",
-                    "attachment;filename=".to_string() + f.file_name.as_str(),
-                )
-                .body(f.content)
-        }
+        Ok(f) => Response::builder()
+            .status(StatusCode::OK)
+            .header("Content-Type", "application/octet-stream")
+            .header(
+                "Content-Disposition",
+                "attachment;filename=".to_string() + f.file_name.as_str(),
+            )
+            .body(f.content),
         Err(err) => Response::builder()
             .status(StatusCode::OK)
             .header("Content-Type", "application/json")
@@ -189,19 +172,15 @@ pub async fn internal_download(Path(file_hash): Path<String>) -> impl IntoRespon
 
 #[handler]
 pub async fn internal_exists(Path(file_hash): Path<String>) -> Json<FileExists> {
-    let start = Instant::now();
     let mut file_exists = false;
     if let Ok(f) = file_service::exists(file_hash.as_str()).await {
         file_exists = f;
     }
 
-    let duration = start.elapsed();
-    info!("internal_exists cost {:?}", duration);
     Json(FileExists::new(file_exists))
 }
 
 async fn upload_other(shared_files: Arc<InternalFiles>, server: String) -> Result<()> {
-    let start = Instant::now();
     let files = shared_files.clone();
     let resp = reqwest::Client::new()
         .post(format!("http://{}/internal/file/upload", server))
@@ -216,13 +195,11 @@ async fn upload_other(shared_files: Arc<InternalFiles>, server: String) -> Resul
         resp.status(),
         resp.bytes().await
     );
-    let duration = start.elapsed();
-    info!("upload_other cost {:?}", duration);
+
     Ok(())
 }
 
 async fn exists_other(file_hash: &String, server: &String) -> Result<bool> {
-    let start = Instant::now();
     let resp = reqwest::Client::new()
         .get(format!(
             "http://{}/internal/file/{}/exists",
@@ -235,13 +212,10 @@ async fn exists_other(file_hash: &String, server: &String) -> Result<bool> {
         .await
         .unwrap();
 
-    let duration = start.elapsed();
-    info!("exists_other cost {:?}", duration);
     Ok(resp.exists)
 }
 
 async fn download_other(file_hash: &String, server: &String) -> Result<poem::Response> {
-    let start = Instant::now();
     let resp = reqwest::Client::new()
         .get(format!("http://{}/internal/file/{}", server, file_hash))
         .send()
@@ -253,7 +227,5 @@ async fn download_other(file_hash: &String, server: &String) -> Result<poem::Res
     *r.headers_mut() = resp.headers().clone();
     r.set_body(resp.bytes().await.map_err(BadRequest)?);
 
-    let duration = start.elapsed();
-    info!("download_other cost {:?}", duration);
     Ok(r)
 }
