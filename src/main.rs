@@ -1,6 +1,7 @@
+use anyhow::Result;
 use poem::{
     error::NotFoundError, get, http::StatusCode, listener::TcpListener, post, EndpointExt,
-    Response, Result, Route, Server,
+    Response, Route, Server,
 };
 use rust_storage::handler::common_handler::index;
 use rust_storage::handler::file_handler::{

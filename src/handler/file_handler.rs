@@ -1,15 +1,16 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::config;
 use crate::model::file_model::{FileExists, FileHead, FileInfo, InternalFile, InternalFiles};
 use crate::service::file_service;
 use crate::util::crypto;
+use anyhow::Result;
 use poem::{
-    error::BadRequest,
     handler,
     http::StatusCode,
     web::{Json, Multipart, Path},
-    IntoResponse, Response, Result,
+    Response,
 };
 use rand::seq::SliceRandom;
 use tokio::task::JoinSet;
@@ -79,7 +80,7 @@ pub async fn upload(mut multipart: Multipart) -> Result<Json<Vec<FileHead>>> {
 }
 
 #[handler]
-pub async fn download(Path(file_hash): Path<String>) -> poem::Response {
+pub async fn download(Path(file_hash): Path<String>) -> Response {
     // 先查询本节点，有则返回
     if let Ok(f) = file_service::find(file_hash.as_str()).await {
         return Response::builder()
@@ -152,7 +153,7 @@ pub async fn internal_upload(req: Json<InternalFiles>) -> Json<Vec<FileHead>> {
 }
 
 #[handler]
-pub async fn internal_download(Path(file_hash): Path<String>) -> impl IntoResponse {
+pub async fn internal_download(Path(file_hash): Path<String>) -> Response {
     let file = file_service::find(file_hash.as_str()).await;
     match file {
         Ok(f) => Response::builder()
@@ -180,23 +181,21 @@ pub async fn internal_exists(Path(file_hash): Path<String>) -> Json<FileExists> 
     Json(FileExists::new(file_exists))
 }
 
-async fn upload_other(shared_files: Arc<InternalFiles>, server: String) -> Result<()> {
+async fn upload_other(shared_files: Arc<InternalFiles>, server: String) -> Result<String> {
     let files = shared_files.clone();
     let resp = reqwest::Client::new()
         .post(format!("http://{}/internal/file/upload", server))
         .json(files.as_ref())
+        .timeout(Duration::from_secs(30))
         .send()
-        .await
-        .map_err(BadRequest)?;
+        .await?;
 
-    info!(
+    Ok(format!(
         "send to {}, status: {}, body: {:?}",
         server,
         resp.status(),
         resp.bytes().await
-    );
-
-    Ok(())
+    ))
 }
 
 async fn exists_other(file_hash: &String, server: &String) -> Result<bool> {
@@ -205,6 +204,7 @@ async fn exists_other(file_hash: &String, server: &String) -> Result<bool> {
             "http://{}/internal/file/{}/exists",
             server, file_hash
         ))
+        .timeout(Duration::from_secs(30))
         .send()
         .await
         .unwrap()
@@ -215,17 +215,17 @@ async fn exists_other(file_hash: &String, server: &String) -> Result<bool> {
     Ok(resp.exists)
 }
 
-async fn download_other(file_hash: &String, server: &String) -> Result<poem::Response> {
+async fn download_other(file_hash: &String, server: &String) -> Result<Response> {
     let resp = reqwest::Client::new()
         .get(format!("http://{}/internal/file/{}", server, file_hash))
+        .timeout(Duration::from_secs(30))
         .send()
-        .await
-        .map_err(BadRequest)?;
+        .await?;
 
     let mut r = poem::Response::default();
     r.set_status(resp.status());
     *r.headers_mut() = resp.headers().clone();
-    r.set_body(resp.bytes().await.map_err(BadRequest)?);
+    r.set_body(resp.bytes().await?);
 
     Ok(r)
 }
