@@ -14,7 +14,6 @@ use poem::{
     Response,
 };
 use rand::seq::SliceRandom;
-use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::info;
 
@@ -54,10 +53,6 @@ pub async fn upload(mut multipart: Multipart) -> Result<Json<Vec<FileHead>>> {
         }
     }
 
-    let shared_files = Arc::new(UploadRequest {
-        files: internal_files,
-    });
-
     // 除本节点外再选 min_count - 1 个节点
     let mut count = config::CONFIG.cluster.min_count - 1;
 
@@ -77,7 +72,12 @@ pub async fn upload(mut multipart: Multipart) -> Result<Json<Vec<FileHead>>> {
 
     let mut tasks = JoinSet::new();
     for server in new_servers {
-        tasks.spawn(upload_other(shared_files.clone(), server.clone()));
+        tasks.spawn(upload_other(
+            UploadRequest {
+                files: internal_files.clone(),
+            },
+            server.clone(),
+        ));
     }
     while let Some(resp) = tasks.join_next().await {
         info!("{:?}", resp);
@@ -150,9 +150,7 @@ pub async fn download(Path(file_hash): Path<String>) -> Response {
     }
 }
 
-async fn upload_other(shared_files: Arc<UploadRequest>, server: String) -> Result<String> {
-    let upload_request = shared_files.clone().as_ref().to_owned();
-
+async fn upload_other(upload_request: UploadRequest, server: String) -> Result<String> {
     let mut client = InternalFilesClient::connect(server.clone()).await?;
     let request = tonic::Request::new(upload_request);
 
