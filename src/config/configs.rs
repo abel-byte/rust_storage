@@ -10,6 +10,7 @@ pub struct Database {
 #[derive(Debug, Deserialize)]
 pub struct Server {
     pub address: String,
+    pub grpc_address: String,
 }
 
 #[derive(Debug, Deserialize)]

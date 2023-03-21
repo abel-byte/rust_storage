@@ -1,0 +1,38 @@
+syntax = "proto3";
+
+package internalfiles;
+
+service InternalFiles {
+  rpc upload(UploadRequest) returns (UploadResponse) {}
+  rpc exists(ExistsRequest) returns (ExistsResponse) {}
+  rpc download(DownloadRequest) returns (DownloadResponse) {}
+}
+
+message UploadRequest { repeated InternalFile files = 1; }
+
+message InternalFile {
+  string hash = 1;
+  string name = 2;
+  bytes content = 3;
+  int64 size = 4;
+}
+
+message UploadResponse { repeated FileHead files = 1; }
+
+message FileHead {
+  bool success = 1;
+  string hash = 2;
+  string name = 3;
+  int64 size = 4;
+}
+
+message ExistsRequest { string hash = 1; }
+
+message ExistsResponse { bool exists = 1; }
+
+message DownloadRequest { string hash = 1; }
+
+message DownloadResponse {
+  string name = 1;
+  bytes Content = 2;
+}

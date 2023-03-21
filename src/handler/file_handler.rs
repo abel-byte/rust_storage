@@ -1,8 +1,9 @@
-use std::sync::Arc;
-use std::time::Duration;
-
 use crate::config;
-use crate::model::file_model::{FileExists, FileHead, FileInfo, InternalFile, InternalFiles};
+use crate::handler::file_grpc_handler::internal_files::{
+    internal_files_client::InternalFilesClient, DownloadRequest, ExistsRequest, InternalFile,
+    UploadRequest,
+};
+use crate::model::file_model::{FileHead, FileInfo};
 use crate::service::file_service;
 use crate::util::crypto;
 use anyhow::Result;
@@ -13,6 +14,7 @@ use poem::{
     Response,
 };
 use rand::seq::SliceRandom;
+use std::sync::Arc;
 use tokio::task::JoinSet;
 use tracing::info;
 
@@ -43,38 +45,43 @@ pub async fn upload(mut multipart: Multipart) -> Result<Json<Vec<FileHead>>> {
                 file_name.clone(),
                 file_info.size,
             ));
-            internal_files.push(InternalFile::new(
-                file_hash,
-                file_name,
-                data,
-                file_info.size,
-            ));
+            internal_files.push(InternalFile {
+                hash: file_hash,
+                name: file_name,
+                content: data,
+                size: file_info.size as i64,
+            });
         }
     }
 
-    let shared_files = Arc::new(InternalFiles::new(internal_files));
+    let shared_files = Arc::new(UploadRequest {
+        files: internal_files,
+    });
 
     // 除本节点外再选 min_count - 1 个节点
     let mut count = config::CONFIG.cluster.min_count - 1;
 
     let mut servers = config::CONFIG.cluster.servers.clone();
-    servers.remove(&config::CONFIG.server.address);
-    let mut new_server: Vec<&String> = servers.iter().collect();
+    let mut local = String::from("http://") + &config::CONFIG.server.grpc_address;
+    servers.remove(&local);
+    let mut new_servers: Vec<&String> = servers.iter().collect();
 
     {
         //  match ret.await {
         //           ^^^^^^ await occurs here, with `mut rng` maybe used later
 
         let mut rng = rand::thread_rng();
-        new_server.shuffle(&mut rng);
-        new_server.truncate(count);
+        new_servers.shuffle(&mut rng);
+        new_servers.truncate(count);
     }
 
     let mut tasks = JoinSet::new();
-    for server in new_server {
+    for server in new_servers {
         tasks.spawn(upload_other(shared_files.clone(), server.clone()));
     }
-    while let Some(_resp) = tasks.join_next().await {}
+    while let Some(resp) = tasks.join_next().await {
+        info!("{:?}", resp);
+    }
 
     Ok(Json(files))
 }
@@ -95,8 +102,19 @@ pub async fn download(Path(file_hash): Path<String>) -> Response {
 
     // 本节点未查询到，从其他节点查询
     let mut servers = config::CONFIG.cluster.servers.clone();
-    servers.remove(&config::CONFIG.server.address);
+    let mut count = servers.len() - 1;
+    let mut local = String::from("http://") + &config::CONFIG.server.grpc_address;
+    servers.remove(&local);
     let mut new_servers: Vec<&String> = servers.iter().collect();
+
+    {
+        //  match ret.await {
+        //           ^^^^^^ await occurs here, with `mut rng` maybe used later
+
+        let mut rng = rand::thread_rng();
+        new_servers.shuffle(&mut rng);
+        new_servers.truncate(count);
+    }
 
     let mut internal_server = String::from("");
     for server in new_servers {
@@ -132,100 +150,66 @@ pub async fn download(Path(file_hash): Path<String>) -> Response {
     }
 }
 
-#[handler]
-pub async fn internal_upload(req: Json<InternalFiles>) -> Json<Vec<FileHead>> {
-    let mut files: Vec<FileHead> = Vec::new();
-    let req_files = &req.files;
-    for file in req_files {
-        let ret = file_service::save(file.file_hash.as_str(), file.file_content.clone()).await;
-        let success = match ret {
-            Ok(_) => true,
-            Err(_) => false,
-        };
-        files.push(FileHead::new(
-            success,
-            file.file_hash.clone(),
-            file.file_name.clone(),
-            file.size,
-        ));
+async fn upload_other(shared_files: Arc<UploadRequest>, server: String) -> Result<String> {
+    let upload_request = shared_files.clone().as_ref().to_owned();
+
+    let mut client = InternalFilesClient::connect(server.clone()).await?;
+    let request = tonic::Request::new(upload_request);
+
+    let result = client.upload(request).await;
+    match result {
+        Ok(response) => Ok(format!(
+            "send to {}, response: {:?}",
+            server,
+            response.into_inner().files
+        )),
+        Err(err) => Ok(format!("send to {} failed, response: {:?}", server, err)),
     }
-    Json(files)
-}
-
-#[handler]
-pub async fn internal_download(Path(file_hash): Path<String>) -> Response {
-    let file = file_service::find(file_hash.as_str()).await;
-    match file {
-        Ok(f) => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/octet-stream")
-            .header(
-                "Content-Disposition",
-                "attachment;filename=".to_string() + f.file_name.as_str(),
-            )
-            .body(f.content),
-        Err(err) => Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(format!("{{\"exists\": false, \"msg\":\"{:?}\"}}", err)),
-    }
-}
-
-#[handler]
-pub async fn internal_exists(Path(file_hash): Path<String>) -> Json<FileExists> {
-    let mut file_exists = false;
-    if let Ok(f) = file_service::exists(file_hash.as_str()).await {
-        file_exists = f;
-    }
-
-    Json(FileExists::new(file_exists))
-}
-
-async fn upload_other(shared_files: Arc<InternalFiles>, server: String) -> Result<String> {
-    let files = shared_files.clone();
-    let resp = reqwest::Client::new()
-        .post(format!("http://{}/internal/file/upload", server))
-        .json(files.as_ref())
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await?;
-
-    Ok(format!(
-        "send to {}, status: {}, body: {:?}",
-        server,
-        resp.status(),
-        resp.bytes().await
-    ))
 }
 
 async fn exists_other(file_hash: &String, server: &String) -> Result<bool> {
-    let resp = reqwest::Client::new()
-        .get(format!(
-            "http://{}/internal/file/{}/exists",
-            server, file_hash
-        ))
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await
-        .unwrap()
-        .json::<FileExists>()
-        .await
-        .unwrap();
+    let exists_request = ExistsRequest {
+        hash: file_hash.to_string(),
+    };
 
-    Ok(resp.exists)
+    let mut client = InternalFilesClient::connect(server.clone()).await?;
+    let request = tonic::Request::new(exists_request);
+
+    let result = client.exists(request).await;
+    match result {
+        Ok(response) => Ok(response.into_inner().exists),
+        Err(_) => Ok(false),
+    }
 }
 
 async fn download_other(file_hash: &String, server: &String) -> Result<Response> {
-    let resp = reqwest::Client::new()
-        .get(format!("http://{}/internal/file/{}", server, file_hash))
-        .timeout(Duration::from_secs(30))
-        .send()
-        .await?;
+    let download_request = DownloadRequest {
+        hash: file_hash.to_string(),
+    };
 
-    let mut r = poem::Response::default();
-    r.set_status(resp.status());
-    *r.headers_mut() = resp.headers().clone();
-    r.set_body(resp.bytes().await?);
+    let mut client = InternalFilesClient::connect(server.clone()).await?;
+    let request = tonic::Request::new(download_request);
 
-    Ok(r)
+    let result = client.download(request).await;
+    match result {
+        Ok(response) => {
+            let res = response.into_inner();
+            let r = Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/octet-stream")
+                .header(
+                    "Content-Disposition",
+                    "attachment;filename=".to_string() + res.name.as_str(),
+                )
+                .body(res.content);
+            Ok(r)
+        }
+        Err(err) => {
+            let r = Response::builder()
+                .status(StatusCode::OK)
+                .header("Content-Type", "application/json")
+                .body(format!("{{\"exists\": false, \"msg\":\"{:?}\"}}", err));
+            Ok(r)
+        }
+    }
 }
