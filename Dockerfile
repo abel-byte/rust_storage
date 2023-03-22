@@ -1,55 +1,33 @@
-####################################################################################################
-## Builder
-####################################################################################################
-FROM rust:latest AS builder
+ARG BASE_IMAGE=rust:latest
 
-RUN rustup target add x86_64-unknown-linux-musl
-RUN rustup component add rustfmt
-RUN apt update && apt install -y musl musl-tools musl-dev protobuf-compiler cmake pkg-config openssl libssl-dev git clang llvm
-RUN update-ca-certificates
-
-# Static linking for C++ code
-RUN ln -s "/usr/bin/g++" "/usr/bin/musl-g++"
-
-# Create appuser
-ENV USER=app
-ENV UID=10001
-
-RUN adduser \
-    --disabled-password \
-    --gecos "" \
-    --home "/nonexistent" \
-    --shell "/sbin/nologin" \
-    --no-create-home \
-    --uid "${UID}" \
-    "${USER}"
-
-
+FROM $BASE_IMAGE as planner
 WORKDIR /app
+RUN echo 'deb http://ftp.cn.debian.org/debian/ stable main' > /etc/apt/sources.list
+RUN apt update && apt install -y protobuf-compiler clang pkg-config libssl-dev
+RUN cargo install cargo-chef
+COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-COPY ./ .
-
-RUN cargo build --target x86_64-unknown-linux-musl --release
-
-####################################################################################################
-## Final image
-####################################################################################################
-FROM alpine
-
-# 增加镜像
-RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.ustc.edu.cn/g' /etc/apk/repositories
-
-# Import from builder.
-COPY --from=builder /etc/passwd /etc/passwd
-COPY --from=builder /etc/group /etc/group
-
+FROM $BASE_IMAGE as cacher
 WORKDIR /app
+RUN echo 'deb http://ftp.cn.debian.org/debian/ stable main' > /etc/apt/sources.list
+RUN apt update && apt install -y protobuf-compiler clang pkg-config libssl-dev
+RUN cargo install cargo-chef
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --recipe-path recipe.json
 
-# Copy our build
-COPY --from=builder /app/config/ ./
-COPY --from=builder /app/target/x86_64-unknown-linux-musl/release/rust_storage ./
+FROM $BASE_IMAGE as builder
+WORKDIR /app
+RUN echo 'deb http://ftp.cn.debian.org/debian/ stable main' > /etc/apt/sources.list
+RUN apt update && apt install -y protobuf-compiler clang pkg-config libssl-dev
+COPY . .
+# Copy over the cached dependencies
+COPY --from=cacher /app/target target
+COPY --from=cacher $CARGO_HOME $CARGO_HOME
+# `cargo build` doesn't work in static linking, need `cargo install`
+RUN cargo install --path .
 
-# Use an unprivileged user.
-USER app:app
-
-CMD ["/app/rust_storage"]
+FROM $BASE_IMAGE
+COPY --from=builder /app/config/ ./config
+COPY --from=builder /usr/local/cargo/bin/rust_storage .
+CMD ["./rust_storage"]

@@ -1,0 +1,10 @@
+[server]
+address = "127.0.0.1:3003"
+grpc_address = "127.0.0.1:3103"
+
+[database]
+url = "./db"
+
+[cluster]
+servers = ["http://storage-0:3100","http://storage-1:3101","http://storage-2:3102","http://storage-3:3103","http://storage-4:3104","http://storage-5:3105"]
+min_count = 4
