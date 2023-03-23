@@ -3,3 +3,6 @@
 /target
 /db
 /db_*/*
+/docs/shell/log/*
+/docs/shell/rust_storage
+/docs/shell/*/database/

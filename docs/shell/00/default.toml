@@ -1,9 +1,9 @@
 [server]
-address = "127.0.0.1:3004"
-grpc_address = "127.0.0.1:3104"
+address = "127.0.0.1:3000"
+grpc_address = "127.0.0.1:3100"
 
 [database]
-url = "./database/4"
+url = "./00/database"
 
 [cluster]
 servers = ["http://127.0.0.1:3100","http://127.0.0.1:3101","http://127.0.0.1:3102","http://127.0.0.1:3103","http://127.0.0.1:3104","http://127.0.0.1:3105"]
