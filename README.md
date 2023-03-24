@@ -13,6 +13,12 @@ cargo build --release
 CONFIG=config/default.toml cargo run --release
 ```
 
-## API
+## 设计
+
+查看[设计文档](./docs/README.md)
+
+## 测试
+
+查看[测试文档](./docs/jmeter/README.md)
 
 
